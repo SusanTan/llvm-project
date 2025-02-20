@@ -6,6 +6,8 @@ add_flang_library(FIRAnalysis
   FIRDialect
   FIRSupport
   HLFIRDialect
+  CGOpsIncGen
+  FIROptCodeGenPassIncGen
 
   LINK_LIBS
   FIRBuilder
