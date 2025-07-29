@@ -243,19 +243,12 @@ static void createDeclareAllocFuncWithArg(mlir::OpBuilder &modBuilder,
   if (unwrapFirBox)
     asFortranDesc << accFirDescriptorPostfix.str();
 
-  // Updating descriptor must occur before the mapping of the data so that
-  // attached data pointer is not overwritten.
-  mlir::acc::UpdateDeviceOp updateDeviceOp =
-      createDataEntryOp<mlir::acc::UpdateDeviceOp>(
-          builder, loc, registerFuncOp.getArgument(0), asFortranDesc, bounds,
-          /*structured=*/false, /*implicit=*/true,
-          mlir::acc::DataClause::acc_update_device, descTy,
-          /*async=*/{}, /*asyncDeviceTypes=*/{}, /*asyncOnlyDeviceTypes=*/{});
-  llvm::SmallVector<int32_t> operandSegments{0, 0, 0, 1};
-  llvm::SmallVector<mlir::Value> operands{updateDeviceOp.getResult()};
-  createSimpleOp<mlir::acc::UpdateOp>(builder, loc, operands, operandSegments);
-
-  if (unwrapFirBox) {
+  // For allocatable variables, we must first map the actual data, then update
+  // the descriptor to point to the device memory.
+  // Check if this is an allocatable variable (box type) that needs data mapping
+  auto unwrappedTy = fir::unwrapRefType(descTy);
+  bool isAllocatable = mlir::isa<fir::BaseBoxType>(unwrappedTy);
+  if (unwrapFirBox || isAllocatable) {
     mlir::Value desc =
         fir::LoadOp::create(builder, loc, registerFuncOp.getArgument(0));
     fir::BoxAddrOp boxAddrOp = fir::BoxAddrOp::create(builder, loc, desc);
@@ -268,6 +261,18 @@ static void createDeclareAllocFuncWithArg(mlir::OpBuilder &modBuilder,
         builder, loc, mlir::acc::DeclareTokenType::get(entryOp.getContext()),
         mlir::ValueRange(entryOp.getAccVar()));
   }
+
+  // Now update the descriptor to point to the device memory after the data
+  // has been mapped.
+  mlir::acc::UpdateDeviceOp updateDeviceOp =
+      createDataEntryOp<mlir::acc::UpdateDeviceOp>(
+          builder, loc, registerFuncOp.getArgument(0), asFortranDesc, bounds,
+          /*structured=*/false, /*implicit=*/true,
+          mlir::acc::DataClause::acc_update_device, descTy,
+          /*async=*/{}, /*asyncDeviceTypes=*/{}, /*asyncOnlyDeviceTypes=*/{});
+  llvm::SmallVector<int32_t> operandSegments{0, 0, 0, 1};
+  llvm::SmallVector<mlir::Value> operands{updateDeviceOp.getResult()};
+  createSimpleOp<mlir::acc::UpdateOp>(builder, loc, operands, operandSegments);
 
   modBuilder.setInsertionPointAfter(registerFuncOp);
   builder.restoreInsertionPoint(crtInsPt);
@@ -3934,19 +3939,12 @@ static void createDeclareAllocFunc(mlir::OpBuilder &modBuilder,
     asFortranDesc << accFirDescriptorPostfix.str();
   llvm::SmallVector<mlir::Value> bounds;
 
-  // Updating descriptor must occur before the mapping of the data so that
-  // attached data pointer is not overwritten.
-  mlir::acc::UpdateDeviceOp updateDeviceOp =
-      createDataEntryOp<mlir::acc::UpdateDeviceOp>(
-          builder, loc, addrOp, asFortranDesc, bounds,
-          /*structured=*/false, /*implicit=*/true,
-          mlir::acc::DataClause::acc_update_device, addrOp.getType(),
-          /*async=*/{}, /*asyncDeviceTypes=*/{}, /*asyncOnlyDeviceTypes=*/{});
-  llvm::SmallVector<int32_t> operandSegments{0, 0, 0, 1};
-  llvm::SmallVector<mlir::Value> operands{updateDeviceOp.getResult()};
-  createSimpleOp<mlir::acc::UpdateOp>(builder, loc, operands, operandSegments);
-
-  if (unwrapFirBox) {
+  // For allocatable global variables, we must first map the actual data, then update
+  // the descriptor to point to the device memory.
+  // Check if this is an allocatable variable (box type) that needs data mapping
+  auto unwrappedTy = fir::unwrapRefType(globalOp.getType());
+  bool isAllocatable = mlir::isa<fir::BaseBoxType>(unwrappedTy);
+  if (unwrapFirBox || isAllocatable) {
     auto loadOp = fir::LoadOp::create(builder, loc, addrOp.getResult());
     fir::BoxAddrOp boxAddrOp = fir::BoxAddrOp::create(builder, loc, loadOp);
     addDeclareAttr(builder, boxAddrOp.getOperation(), clause);
@@ -3958,6 +3956,18 @@ static void createDeclareAllocFunc(mlir::OpBuilder &modBuilder,
         builder, loc, mlir::acc::DeclareTokenType::get(entryOp.getContext()),
         mlir::ValueRange(entryOp.getAccVar()));
   }
+
+  // Now update the descriptor to point to the device memory after the data
+  // has been mapped.
+  mlir::acc::UpdateDeviceOp updateDeviceOp =
+      createDataEntryOp<mlir::acc::UpdateDeviceOp>(
+          builder, loc, addrOp, asFortranDesc, bounds,
+          /*structured=*/false, /*implicit=*/true,
+          mlir::acc::DataClause::acc_update_device, addrOp.getType(),
+          /*async=*/{}, /*asyncDeviceTypes=*/{}, /*asyncOnlyDeviceTypes=*/{});
+  llvm::SmallVector<int32_t> operandSegments{0, 0, 0, 1};
+  llvm::SmallVector<mlir::Value> operands{updateDeviceOp.getResult()};
+  createSimpleOp<mlir::acc::UpdateOp>(builder, loc, operands, operandSegments);
 
   modBuilder.setInsertionPointAfter(registerFuncOp);
 }
