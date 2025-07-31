@@ -3989,32 +3989,15 @@ static void createDeclareAllocFunc(mlir::OpBuilder &modBuilder,
   asFortran << Fortran::lower::mangle::demangleName(globalOp.getSymName());
   llvm::SmallVector<mlir::Value> bounds;
 
-  // Step 1: Get existing device pointer  
-  mlir::acc::GetDevicePtrOp getDevicePtrOp = createDataEntryOp<mlir::acc::GetDevicePtrOp>(
-      builder, loc, addrOp.getResult(), asFortran, bounds,
-      /*structured=*/false, /*implicit=*/false, clause, addrOp.getType(),
-      /*async=*/{}, /*asyncDeviceTypes=*/{}, /*asyncOnlyDeviceTypes=*/{});
-
-  // Step 2: Exit data
-  llvm::SmallVector<mlir::Value> exitOperands{getDevicePtrOp.getAccPtr()};
-  llvm::SmallVector<int32_t> exitSegments{0, 0, 0, 0, 1};
-  createSimpleOp<mlir::acc::ExitDataOp>(builder, loc, exitOperands, exitSegments);
-  
-  // Step 3: Delete mapping
-  mlir::acc::DeleteOp deleteOp = builder.create<mlir::acc::DeleteOp>(
-      loc, getDevicePtrOp.getAccPtr(), /*structured=*/false, /*implicit=*/false);
-  deleteOp.setDataClause(mlir::acc::DataClause::acc_delete);
-
-  // Step 4: Create new mapping
+  // Create data entry operation with copyin
   EntryOp createOp = createDataEntryOp<EntryOp>(
       builder, loc, addrOp.getResult(), asFortran, bounds,
-      /*structured=*/false, /*implicit=*/false, clause, addrOp.getType(),
+      /*structured=*/false, /*implicit=*/false, mlir::acc::DataClause::acc_copyin, addrOp.getType(),
       /*async=*/{}, /*asyncDeviceTypes=*/{}, /*asyncOnlyDeviceTypes=*/{});
   
-  // Step 5: Register with declare system
-  mlir::acc::DeclareEnterOp::create(
-      builder, loc, mlir::acc::DeclareTokenType::get(createOp.getContext()),
-      mlir::ValueRange(createOp.getAccVar()));
+  // Create declare_enter operation
+  builder.create<mlir::acc::DeclareEnterOp>(
+      loc, mlir::acc::DeclareTokenType::get(createOp.getContext()), mlir::ValueRange(createOp.getAccVar()));
 
   modBuilder.setInsertionPointAfter(registerFuncOp);
 }
