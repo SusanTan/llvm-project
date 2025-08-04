@@ -3989,15 +3989,18 @@ static void createDeclareAllocFunc(mlir::OpBuilder &modBuilder,
   asFortran << Fortran::lower::mangle::demangleName(globalOp.getSymName());
   llvm::SmallVector<mlir::Value> bounds;
 
-  // Create data entry operation with copyin
+  // Create data entry operation
   EntryOp createOp = createDataEntryOp<EntryOp>(
       builder, loc, addrOp.getResult(), asFortran, bounds,
-      /*structured=*/false, /*implicit=*/false, mlir::acc::DataClause::acc_copyin, addrOp.getType(),
+      /*structured=*/false, /*implicit=*/false, clause, addrOp.getType(),
       /*async=*/{}, /*asyncDeviceTypes=*/{}, /*asyncOnlyDeviceTypes=*/{});
-  
-  // Create declare_enter operation
-  builder.create<mlir::acc::DeclareEnterOp>(
-      loc, mlir::acc::DeclareTokenType::get(createOp.getContext()), mlir::ValueRange(createOp.getAccVar()));
+
+  // Create declare_enter operation from declare_action
+  auto declareEnterOp = builder.create<mlir::acc::DeclareEnterOp>(
+      loc, mlir::acc::DeclareTokenType::get(createOp.getContext()),
+      mlir::ValueRange(createOp.getAccVar()));
+  // Mark this as coming from declare_action
+  declareEnterOp->setAttr("acc.from_declare_action", builder.getBoolAttr(true));
 
   modBuilder.setInsertionPointAfter(registerFuncOp);
 }
