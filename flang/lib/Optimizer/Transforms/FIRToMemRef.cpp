@@ -1010,6 +1010,21 @@ void FIRToMemRef::rewriteStoreOp(fir::StoreOp store, PatternRewriter &rewriter,
   Value value = store.getValue();
   rewriter.setInsertionPointAfter(store);
 
+  // Small local optimization that avoids the round-trip:
+  //   %25 = memref.load ... : memref<i32>
+  //   %26 = fir.convert %25 : (i32) -> !fir.logical<4>   // from load rewrite
+  //   %27 = fir.convert %26 : (!fir.logical<4>) -> i32   // from store rewrite
+  //   memref.store %27, ... : memref<i32>
+  // which would normalize the loaded value to 1 and break TRANSFER-like flows,
+  // e.g. transfer(transfer(i, .true.), 0).
+  if (auto to = value.getDefiningOp<fir::ConvertOp>()) {
+    Value raw = to.getValue();
+    if (auto memrefTy = dyn_cast<MemRefType>(converted.getType()))
+      if (raw.getType() == memrefTy.getElementType() &&
+          isa_and_nonnull<memref::LoadOp>(raw.getDefiningOp()))
+        value = raw;
+  }
+
   if (isa<fir::LogicalType>(value.getType())) {
     Type convertedType = typeConverter.convertType(value.getType());
     value =
