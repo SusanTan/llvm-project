@@ -178,9 +178,8 @@ public:
                       if (auto callee = call.getCalleeAttr()) {
                         StringRef funcName =
                             callee.getLeafReference().getValue();
-                        if (!isSupportedDeclareActionRuntime(funcName)) {
+                        if (!isSupportedDeclareActionRuntime(funcName))
                           return {};
-                        }
                         auto args = call.getArgs();
                         if (args.empty())
                           return {};
