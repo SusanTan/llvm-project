@@ -67,6 +67,7 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
+#include <cassert>
 
 #define DEBUG_TYPE "acc-declare-action-conversion"
 
@@ -178,7 +179,11 @@ public:
                       if (auto callee = call.getCalleeAttr()) {
                         StringRef funcName =
                             callee.getLeafReference().getValue();
-                        if (!isSupportedDeclareActionRuntime(funcName))
+                        const bool isSupported =
+                            isSupportedDeclareActionRuntime(funcName);
+                        assert(isSupported && "unexpected fir.call callee for "
+                                              "acc.declare_action");
+                        if (!isSupported)
                           return {};
                         auto args = call.getArgs();
                         if (args.empty())
