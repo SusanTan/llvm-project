@@ -4432,16 +4432,10 @@ void Fortran::lower::attachDeclarePostAllocAction(
   fctName << converter.mangleName(sym) << declarePostAllocSuffix.str();
   mlir::Operation *op = &builder.getInsertionBlock()->back();
 
-  if (auto resOp = mlir::dyn_cast<fir::ResultOp>(*op)) {
-    assert(resOp.getOperands().size() == 0 &&
-           "expect only fir.result op with no operand");
-    op = op->getPrevNode();
-  }
-  if (auto termOp = mlir::dyn_cast<mlir::acc::TerminatorOp>(*op)) {
-    if (termOp->getOperands().size() != 0) {
-      mlir::emitError(termOp.getLoc(),
-                      "expect only acc.terminator op with no operand");
-      return;
+  if (op && op->hasTrait<mlir::OpTrait::IsTerminator>()) {
+    if (op->getNumOperands() != 0) {
+      fir::emitFatalError(op->getLoc(),
+                          "expect only terminator op with no operand");
     }
     op = op->getPrevNode();
   }
@@ -4513,16 +4507,10 @@ void Fortran::lower::attachDeclarePostDeallocAction(
   std::stringstream fctName;
   fctName << converter.mangleName(sym) << declarePostDeallocSuffix.str();
   mlir::Operation *op = &builder.getInsertionBlock()->back();
-  if (auto resOp = mlir::dyn_cast<fir::ResultOp>(*op)) {
-    assert(resOp.getOperands().size() == 0 &&
-           "expect only fir.result op with no operand");
-    op = op->getPrevNode();
-  }
-  if (auto termOp = mlir::dyn_cast<mlir::acc::TerminatorOp>(*op)) {
-    if (termOp->getOperands().size() != 0) {
-      mlir::emitError(termOp.getLoc(),
-                      "expect only acc.terminator op with no operand");
-      return;
+  if (op && op->hasTrait<mlir::OpTrait::IsTerminator>()) {
+    if (op->getNumOperands() != 0) {
+      fir::emitFatalError(op->getLoc(),
+                          "expect only terminator op with no operand");
     }
     op = op->getPrevNode();
   }
