@@ -4132,7 +4132,8 @@ void createOpenACCRoutineConstruct(
                                 workerDeviceTypes, vectorDeviceTypes) &&
           routineOp.getNohost() == hasNohost)
         return;
-      mlir::emitError(loc, "Routine already specified with different clauses");
+      fir::emitFatalError(loc,
+                          "Routine already specified with different clauses");
     }
   }
   std::stringstream routineOpName;
