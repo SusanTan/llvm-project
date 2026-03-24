@@ -4434,10 +4434,9 @@ void Fortran::lower::attachDeclarePostAllocAction(
   mlir::Operation *op = &builder.getInsertionBlock()->back();
 
   if (op && op->hasTrait<mlir::OpTrait::IsTerminator>()) {
-    if (op->getNumOperands() != 0) {
+    if (op->getNumOperands() != 0)
       fir::emitFatalError(op->getLoc(),
                           "expect only terminator op with no operand");
-    }
     op = op->getPrevNode();
   }
   assert(op && "expect operation to attach the post allocation action");
