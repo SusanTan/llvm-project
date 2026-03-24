@@ -4438,8 +4438,11 @@ void Fortran::lower::attachDeclarePostAllocAction(
     op = op->getPrevNode();
   }
   if (auto termOp = mlir::dyn_cast<mlir::acc::TerminatorOp>(*op)) {
-    assert(termOp->getOperands().size() == 0 &&
-           "expect only acc.terminator op with no operand");
+    if (termOp->getOperands().size() != 0) {
+      mlir::emitError(termOp.getLoc(),
+                      "expect only acc.terminator op with no operand");
+      return;
+    }
     op = op->getPrevNode();
   }
   assert(op && "expect operation to attach the post allocation action");
@@ -4516,8 +4519,11 @@ void Fortran::lower::attachDeclarePostDeallocAction(
     op = op->getPrevNode();
   }
   if (auto termOp = mlir::dyn_cast<mlir::acc::TerminatorOp>(*op)) {
-    assert(termOp->getOperands().size() == 0 &&
-           "expect only acc.terminator op with no operand");
+    if (termOp->getOperands().size() != 0) {
+      mlir::emitError(termOp.getLoc(),
+                      "expect only acc.terminator op with no operand");
+      return;
+    }
     op = op->getPrevNode();
   }
   assert(op && "expect operation to attach the post deallocation action");
