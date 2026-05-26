@@ -659,9 +659,8 @@ FIRToMemRef::convertArrayCoorOp(Operation *memOp, fir::ArrayCoorOp arrayCoorOp,
   bool isDescriptor = mlir::isa<fir::BaseBoxType>(firMemref.getType()) ||
                       firMemref.getDefiningOp<fir::BoxAddrOp>() != nullptr;
 
-  // For complex projections, reinterpret memref<d0×...×complex<T>> as
-  // memref<d0×...×2×T> and append the component index (0=re, 1=im) so that
-  // each load/store touches exactly sizeof(T) bytes.
+  // Projected complex (%re / %im): ref-backed coors use ...x2xT below;
+  // box/rebox coors use fir.box_dims (see useBoxDimsForStrides).
   SliceInfo sliceInfo;
   collectSliceInfoFrom(arrayCoorOp, sliceInfo);
   if (auto embox = firMemref.getDefiningOp<fir::EmboxOp>())
@@ -680,17 +679,21 @@ FIRToMemRef::convertArrayCoorOp(Operation *memOp, fir::ArrayCoorOp arrayCoorOp,
                "0 (real) or 1 (imaginary), bailing out of conversion\n");
         return failure();
       }
-      auto projection = *sliceInfo.projectedSliceStart;
-      SmallVector<int64_t> shape(srcTy.getShape());
-      shape.push_back(2);
-      Value compMemref =
-          fir::ConvertOp::create(
-              rewriter, loc, MemRefType::get(shape, complexTy.getElementType()),
-              *converted)
-              .getResult();
-      indices.push_back(
-          arith::ConstantIndexOp::create(rewriter, loc, projection));
-      return std::pair{compMemref, indices};
+      // Box/rebox coors use fir.box_dims below; ref-backed coors use ...x2xT
+      // with the component index (0=re, 1=im) as the trailing dimension.
+      if (!(isRebox || isDescriptor)) {
+        auto projection = *sliceInfo.projectedSliceStart;
+        SmallVector<int64_t> shape(srcTy.getShape());
+        shape.push_back(2);
+        Value compMemref =
+            fir::ConvertOp::create(
+                rewriter, loc,
+                MemRefType::get(shape, complexTy.getElementType()), *converted)
+                .getResult();
+        indices.push_back(
+            arith::ConstantIndexOp::create(rewriter, loc, projection));
+        return std::pair{compMemref, indices};
+      }
     }
   }
 
@@ -710,25 +713,24 @@ FIRToMemRef::convertArrayCoorOp(Operation *memOp, fir::ArrayCoorOp arrayCoorOp,
   strides.reserve(rank);
 
   SmallVector<Value> &shapeVec = sliceInfo.shapeVec;
-  // Pick how to derive sizes/strides for the reinterpret_cast view:
+
+  // memref.reinterpret_cast needs dynamic sizes and strides. Two sources:
   //
-  //   shapeVec path: use the collected fir.shape extents and synthesize
-  //     row-major strides. Valid when those extents describe the underlying
-  //     memref's layout -- shape from a defining embox, a shape_shift that
-  //     carries lower bounds, or no slicing at all.
-  //
-  //   box_dims path: query the descriptor at runtime. Required when:
-  //     (a) the slice is projected (physical layout is owned by the box);
-  //     (b) we have no shape information at all; or
-  //     (c) the array_coor itself carries fir.shape + fir.slice on a
-  //         descriptor-backed memref with no shift -- those extents describe
-  //         the post-slice view, not the source, so they cannot be used to
-  //         compute strides (e.g. rebox sourced array_coor).
-  const bool descriptorOwnsLayout =
-      sliceInfo.hasProjectedSlice || shapeVec.empty() ||
-      (isDescriptor && sliceInfo.shiftVec.empty() && arrayCoorOp.getShape() &&
-       arrayCoorOp.getSlice());
-  if (descriptorOwnsLayout) {
+  //   shapeVec — fir.shape extents + assumed row-major contiguous layout.
+  //   box_dims — lb / extent / byte_stride from the Fortran box at runtime.
+
+  const bool projectedComplexViaBox =
+      sliceInfo.hasProjectedSlice && (isDescriptor || isRebox);
+  const bool noShapeExtents = shapeVec.empty();
+  const bool boxCoorHasExtentShapeAndSlice =
+      isDescriptor && arrayCoorOp.getSlice() &&
+      mlir::isa_and_nonnull<fir::ShapeOp>(
+          arrayCoorOp.getShape().getDefiningOp());
+
+  const bool useBoxDimsForStrides =
+      projectedComplexViaBox || noShapeExtents || boxCoorHasExtentShapeAndSlice;
+
+  if (useBoxDimsForStrides) {
     // Projected slices carry their physical layout in the descriptor. Rebuild
     // the MemRef view from box metadata instead of from slice triplets.
     auto boxElementSize =
@@ -779,7 +781,7 @@ FIRToMemRef::convertArrayCoorOp(Operation *memOp, fir::ArrayCoorOp arrayCoorOp,
   Value offset = arith::ConstantIndexOp::create(rewriter, loc, 0);
 
   auto reinterpret = memref::ReinterpretCastOp::create(
-      rewriter, loc, memRefTy, *converted, offset, sizes, strides);
+      rewriter, loc, memRefTy, convertedVal, offset, sizes, strides);
 
   Value result = reinterpret->getResult(0);
   return std::pair{result, indices};
@@ -869,10 +871,19 @@ FIRToMemRef::getFIRConvert(Operation *memOp, Operation *op,
           Type originalType = embox.getMemref().getType();
           basePtr = embox.getMemref();
 
-          if (typeConverter.convertibleMemrefType(originalType)) {
-            auto convertedMemrefTy =
-                typeConverter.convertMemrefType(originalType);
-            memrefTy = convertedMemrefTy;
+          if (projectedSlice) {
+            // View element type is real (e.g. %re -> f32); storage is complex.
+            if (auto boxTy = dyn_cast<fir::BoxType>(embox.getType())) {
+              Type refTy = fir::ReferenceType::get(boxTy.getElementType());
+              if (typeConverter.convertibleMemrefType(refTy))
+                memrefTy = typeConverter.convertMemrefType(refTy);
+              else
+                return failure();
+            } else {
+              return failure();
+            }
+          } else if (typeConverter.convertibleMemrefType(originalType)) {
+            memrefTy = typeConverter.convertMemrefType(originalType);
           } else {
             return failure();
           }
